@@ -55,66 +55,128 @@ def _is_header_footer(line: str) -> bool:
 
 
 def parse_items_from_text(text: str) -> List[Dict]:
-    """Parse OCR text into items with `name`, `quantity`, `price`, and `amount`.
-
-    Format: Name ... Qty ... UnitPrice ... Total
-    Strategy: 
-    - Last number = TOTAL amount
-    - Second-to-last = UNIT PRICE
-    - Quantity is inferred: total / unit_price
+    """Parse OCR text into items, handling multi-line formats.
+    
+    Handles formats where item info is split across multiple lines:
+    - Name
+    - Category/Extra info
+    - Numbers (Qty, Price, Total)
     """
     items: List[Dict] = []
     lines = [l.strip() for l in text.splitlines() if l.strip()]
+    
+    # Filter out header/footer lines
+    cleaned_lines = []
     for line in lines:
         if _is_header_footer(line):
             continue
         if _is_date_or_time(line):
             continue
-        # skip lines that are just numbers
+        cleaned_lines.append(line)
+    
+    # Group lines: collect name lines until we hit numbers
+    i = 0
+    while i < len(cleaned_lines):
+        line = cleaned_lines[i]
+        
+        # Skip lines that are just numbers
         if re.match(r'^[\d\.,\s%]+$', line):
+            i += 1
             continue
         
-        nums = NUM_RE.findall(line)
-        if len(nums) < 2:  # need at least unit_price and total
-            continue
+        # Start collecting an item
+        name_parts = [line]
+        i += 1
         
-        # filter out very large numbers (>10000)
-        nums = [n for n in nums if _clean_num(n) < 10000]
-        if len(nums) < 2:
-            continue
+        # Collect additional text lines (categories, units, etc)
+        while i < len(cleaned_lines) and re.match(r'^[\d\.,\s%]+$', cleaned_lines[i]) == None:
+            next_line = cleaned_lines[i]
+            # Check if next line is text or numbers
+            nums = NUM_RE.findall(next_line)
+            if nums:
+                # Has numbers, could be part of this item
+                name_parts.append(next_line)
+                break
+            else:
+                # Just text, add to name
+                name_parts.append(next_line)
+                i += 1
+        
+        # Now collect all consecutive number lines
+        num_lines = []
+        while i < len(cleaned_lines) and re.match(r'^[\d\.,\s%]+$', cleaned_lines[i]):
+            num_lines.append(cleaned_lines[i])
+            i += 1
+        
+        # Parse this item if we have name and numbers
+        if name_parts and num_lines:
+            full_line = ' '.join(name_parts + num_lines)
+            parsed = _parse_single_item(full_line)
+            if parsed:
+                items.append(parsed)
+        elif name_parts:
+            # Try to parse name_parts as a single line
+            full_line = ' '.join(name_parts)
+            parsed = _parse_single_item(full_line)
+            if parsed:
+                items.append(parsed)
+    
+    return items
 
-        # Last number = TOTAL, Second-to-last = UNIT PRICE
+
+def _parse_single_item(line: str) -> Dict:
+    """Parse a single item line into name, quantity, price, amount."""
+    nums = NUM_RE.findall(line)
+    if not nums:
+        return None
+    
+    # filter out very large numbers (>10000) - likely IDs
+    nums = [n for n in nums if _clean_num(n) < 10000]
+    if not nums:
+        return None
+
+    # Parse based on number count
+    if len(nums) >= 2:
+        # Format: ... Price Total
+        # Last = Total, 2nd-to-last = Unit Price
         line_total = _clean_num(nums[-1])
         unit_price = _clean_num(nums[-2])
         
-        # both must be positive
-        if line_total <= 0 or unit_price <= 0:
-            continue
-        
-        # infer quantity: total / unit_price
-        try:
-            qty = round(line_total / unit_price, 2)
-            if qty > 100 or qty <= 0:
+        if unit_price > 0 and line_total > 0:
+            # Calculate qty from total/price
+            try:
+                qty = round(line_total / unit_price, 2)
+                if qty > 100:
+                    qty = 1  # unreasonable qty
+            except:
                 qty = 1
-        except:
+        else:
+            # Fallback: treat last as price
+            unit_price = line_total
             qty = 1
-        
-        line_total = round(line_total, 2)
-        unit_price = round(unit_price, 2)
+    else:
+        # Only 1 number: treat as price
+        unit_price = _clean_num(nums[0])
+        line_total = unit_price
+        qty = 1
+    
+    if unit_price <= 0:
+        return None
+    
+    line_total = round(line_total, 2)
+    unit_price = round(unit_price, 2)
 
-        # extract name: remove all numbers and category/unit words
-        name_part = re.sub(NUM_RE, '', line).strip(' -:,.')
-        name = re.sub(r"\b(kg|g|dozen|x|pcs|pc|tab|tabnet|dairy|meat|snacks|bakery|fruits|produce|pharmacy|beverage|%)\b", '', name_part, flags=re.IGNORECASE).strip()
-        if not name or len(name) < 2:
-            continue
+    # extract name: remove all numbers and category/unit words
+    name_part = re.sub(NUM_RE, '', line).strip(' -:,.')
+    name = re.sub(r"\b(kg|g|dozen|x|pcs|pc|tab|tabnet|dairy|meat|snacks|bakery|fruits|produce|pharmacy|beverage|%)\b", '', name_part, flags=re.IGNORECASE).strip()
+    if not name or len(name) < 2:
+        return None
 
-        items.append({
-            'name': name,
-            'quantity': qty,
-            'rate': unit_price,
-            'price': unit_price,
-            'line_total': line_total,
-            'amount': line_total,
-        })
-
-    return items
+    return {
+        'name': name,
+        'quantity': qty,
+        'rate': unit_price,
+        'price': unit_price,
+        'line_total': line_total,
+        'amount': line_total,
+    }
