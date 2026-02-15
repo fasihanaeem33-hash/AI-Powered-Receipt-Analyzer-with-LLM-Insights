@@ -20,7 +20,7 @@ HEADER_FOOTER_PATTERNS = [
     r"grand total", r"total", r"gst", r"amount paid", r"change", r"payment",
     r"time", r"wednesday", r"monday", r"tuesday", r"thursday", r"friday", r"saturday", r"sunday",
     r"january", r"february", r"march", r"april", r"may", r"june", r"july", r"august", r"september", r"october", r"november", r"december",
-    r"am", r"pm",
+    r"am", r"pm", r"please", r"visit", r"again", r"shopping", r"returned", r"method",
 ]
 
 
@@ -79,8 +79,14 @@ def parse_items_from_text(text: str) -> List[Dict]:
     while i < len(cleaned_lines):
         line = cleaned_lines[i]
         
-        # Skip lines that are just numbers
+        # Skip pure number lines (subtotals, standalone amounts)
         if re.match(r'^[\d\.,\s%]+$', line):
+            i += 1
+            continue
+        
+        # Check if this is a subtotal/total line (has word + numbers)
+        line_lower = line.lower()
+        if any(kw in line_lower for kw in ['subtotal', 'total', 'gst', 'payment']):
             i += 1
             continue
         
@@ -91,6 +97,10 @@ def parse_items_from_text(text: str) -> List[Dict]:
         # Collect additional text lines (categories, units, etc)
         while i < len(cleaned_lines) and re.match(r'^[\d\.,\s%]+$', cleaned_lines[i]) == None:
             next_line = cleaned_lines[i]
+            next_lower = next_line.lower()
+            # Skip if next line is subtotal/total
+            if any(kw in next_lower for kw in ['subtotal', 'total', 'gst', 'payment']):
+                break
             # Check if next line is text or numbers
             nums = NUM_RE.findall(next_line)
             if nums:
