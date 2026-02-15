@@ -1,0 +1,16 @@
+.venv/
+.venv311/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.streamlit/
+receipt_analyzer/samples/
+*.egg-info/
+dist/
+build/
+.DS_Store
+.env
+.vscode/
+.idea/
