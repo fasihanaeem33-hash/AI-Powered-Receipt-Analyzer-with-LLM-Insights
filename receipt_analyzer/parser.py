@@ -18,7 +18,26 @@ def _clean_num(token: str) -> float:
 HEADER_FOOTER_PATTERNS = [
     r"invoice", r"date", r"cash", r"cashier", r"phone", r"thank", r"subtotal",
     r"grand total", r"total", r"gst", r"amount paid", r"change", r"payment",
+    r"time", r"wednesday", r"monday", r"tuesday", r"thursday", r"friday", r"saturday", r"sunday",
+    r"january", r"february", r"march", r"april", r"may", r"june", r"july", r"august", r"september", r"october", r"november", r"december",
+    r"am", r"pm",
 ]
+
+
+def _is_date_or_time(line: str) -> bool:
+    """Check if line contains date/time patterns (like '11:37 AM', 'Feb 2026', etc)."""
+    s = line.lower()
+    # check for time patterns (HH:MM AM/PM)
+    if ':' in s and ('am' in s or 'pm' in s):
+        return True
+    # check for year patterns (like 2026, 2025, etc)
+    if any(f"{year}" in s for year in range(2000, 2050)):
+        return True
+    # check for month abbreviations
+    months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+    if any(m in s for m in months):
+        return True
+    return False
 
 
 def _is_header_footer(line: str) -> bool:
@@ -39,7 +58,7 @@ def parse_items_from_text(text: str) -> List[Dict]:
     """Parse OCR text into items with `name`, `quantity`, `rate`, and `amount`.
 
     Heuristics:
-    - Skip header/footer lines.
+    - Skip header/footer lines and date/time lines.
     - Use numeric tokens: treat last numeric token as `amount`, previous as `rate`, first numeric token as `quantity` when sensible.
     - If only rate and qty present, compute line_total = rate * qty.
     - If amount present, use it as line_total.
@@ -48,6 +67,8 @@ def parse_items_from_text(text: str) -> List[Dict]:
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     for line in lines:
         if _is_header_footer(line):
+            continue
+        if _is_date_or_time(line):
             continue
         # skip lines that are just numbers (likely totals or standalone amounts)
         if re.match(r'^[\d\.,\s]+$', line):
